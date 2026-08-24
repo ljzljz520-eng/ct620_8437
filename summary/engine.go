@@ -49,13 +49,21 @@ func (e *Engine) Generate(ctx context.Context, id string) error {
 	for step := 1; step <= 4; step++ {
 		select {
 		case <-ctx.Done():
-			_ = e.Repo.UpdateTask("task-"+id, func(task *domain.SummaryTask) {
+			if err := e.Repo.UpdateAttachment(id, func(a *domain.Attachment) { a.MarkCancelled() }); err != nil {
+				return err
+			}
+			if err := e.Repo.UpdateTask("task-"+id, func(task *domain.SummaryTask) {
 				task.State = domain.TaskCancelled
 				task.Error = ctx.Err().Error()
 				task.Progress = (step - 1) * 25
-			})
-			_ = e.Repo.RecordTransition(id, "cancel-observed", "generation context cancelled")
-			// The injected defect is that generation continues after observing cancellation.
+			}); err != nil {
+				return err
+			}
+			if err := e.Repo.RecordTransition(id, "cancel-observed", "generation context cancelled"); err != nil {
+				return err
+			}
+			// Stop generation: keep the attachment unprocessed instead of committing success.
+			return ctx.Err()
 		default:
 		}
 		if err := e.Repo.UpdateTask("task-"+id, func(task *domain.SummaryTask) { task.State = domain.TaskRunning; task.Progress = step * 25 }); err != nil {
